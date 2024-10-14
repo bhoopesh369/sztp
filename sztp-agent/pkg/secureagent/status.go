@@ -17,31 +17,28 @@ import (
 	"time"
 )
 
-const (
-    statusFilePath = "/var/lib/sztp/status.json"
-    resultFilePath = "/var/lib/sztp/result.json"
-    symlinkDir = "/run/sztp"
-)
-
-// Status represents the structure of status.json
-// Status represents the structure of status.json
+// Status represents the status of the provisioning process.
 type Status struct {
     Init            StageStatus `json:"init"`
-    DownloadingFile StageStatus `json:"downloading-file"`
-    WaitingDHCP     string      `json:"waiting-dhcp"`
+    DownloadingFile StageStatus `json:"downloading-file"` // not sure if this is needed
     PendingReboot   StageStatus `json:"pending-reboot"`
+    Parsing         StageStatus `json:"parsing"`
+    BootImage       StageStatus `json:"boot-image"`
+    PreScript       StageStatus `json:"pre-script"`
+    Config          StageStatus `json:"config"`
+    PostScript      StageStatus `json:"post-script"`
+    Bootstrap       StageStatus `json:"bootstrap"`
     IsCompleted     StageStatus `json:"is-completed"`
+    Informational   string      `json:"informational"`
     DataSource      string      `json:"datasource"`
     Stage           string      `json:"stage"`
 }
 
-// Result represents the structure of result.json
 type Result struct {
-    DataSource string   `json:"datasource"`
+    DataSource string   `json:"dat asource"`
     Errors     []string `json:"errors"`
 }
 
-// StageStatus holds the status for each stage of onboarding
 type StageStatus struct {
     Errors []string `json:"errors"`
     Start  float64  `json:"start"`
@@ -49,8 +46,8 @@ type StageStatus struct {
 }
 
 // LoadStatusFile loads the current status.json from the filesystem.
-func LoadStatusFile() (*Status, error) {
-    file, err := os.ReadFile(statusFilePath)
+func (a *Agent) loadStatusFile() (*Status, error) {
+    file, err := os.ReadFile(a.GetStatusFilePath())
     if err != nil {
         return nil, err
     }
@@ -62,106 +59,88 @@ func LoadStatusFile() (*Status, error) {
     return &status, nil
 }
 
-// UpdateAndSaveStatus updates the specific part of the status object based on the current stage.
-func UpdateAndSaveStatus(stage string, isStart bool, errMsg string) error {
-    status, err := LoadStatusFile()
-    if err != nil {
-        fmt.Println("Creating a new status file.")
-        status = &Status{
-            DataSource: "ds",
-            Stage:      "",
-        }
-    }
+func (a *Agent) UpdateAndSaveStatus(stage string, isStart bool, errMsg string) error {
+	status, err := a.loadStatusFile()
+	if err != nil {
+		fmt.Println("Creating a new status file.")
+		status = a.createNewStatus()
+	}
 
-    now := float64(time.Now().Unix())
-    switch stage {
-    case "init":
-        if isStart {
-            status.Init.Start = now
-            status.Init.End = 0
-        } else {
-            status.Init.End = now
-            if errMsg != "" {
-                status.Init.Errors = append(status.Init.Errors, errMsg)
-            }
-        }
-    case "downloading-file":
-        if isStart {
-            status.DownloadingFile.Start = now
-            status.DownloadingFile.End = 0
-        } else {
-            status.DownloadingFile.End = now
-            if errMsg != "" {
-                status.DownloadingFile.Errors = append(status.DownloadingFile.Errors, errMsg)
-            }
-        }
-    case "waiting-dhcp":
-        if isStart {
-            status.WaitingDHCP = "in-progress"
-        } else {
-            status.WaitingDHCP = "completed"
-        }
-    case "pending-reboot":
-        if isStart {
-            status.PendingReboot.Start = now
-            status.PendingReboot.End = 0
-        } else {
-            status.PendingReboot.End = now
-            if errMsg != "" {
-                status.PendingReboot.Errors = append(status.PendingReboot.Errors, errMsg)
-            }
-        }
-    case "is-completed":
-        if isStart {
-            status.IsCompleted.Start = now
-            status.IsCompleted.End = 0
-        } else {
-            status.IsCompleted.End = now
-            if errMsg != "" {
-                status.IsCompleted.Errors = append(status.IsCompleted.Errors, errMsg)
-            }
-        }
-    }
+	if err := a.updateStageStatus(status, stage, isStart, errMsg); err != nil {
+		return err
+	}
 
-    // Update the current stage
-    if isStart {
-        status.Stage = stage
-    } else {
-        status.Stage = ""
-    }
-
-    tempPath := statusFilePath + ".tmp"
-    file, err := os.Create(tempPath)
-    if err != nil {
-        return err
-    }
-    defer file.Close()
-
-    encoder := json.NewEncoder(file)
-    if err := encoder.Encode(status); err != nil {
-        return err
-    }
-
-    // Atomic move of temp file to replace the original.
-    return os.Rename(tempPath, statusFilePath)
+	return a.saveStatus(status)
 }
 
-// SaveResultFile writes the result.json file after provisioning is complete.
-func SaveResultFile(result *Result) error {
-	tempPath := resultFilePath + ".tmp"
-	file, err := os.Create(tempPath)
-	if err != nil {
-		return err
+// createNewStatus initializes a new Status object when status.json doesn't exist.
+func (a *Agent) createNewStatus() *Status {
+	return &Status{
+		DataSource: "ds",
+		Stage:      "",
 	}
-	defer file.Close()
+}
 
-	encoder := json.NewEncoder(file)
-	if err := encoder.Encode(result); err != nil {
-		return err
+// updateStageStatus updates the status object for a specific stage.
+func (a *Agent) updateStageStatus(status *Status, stage string, isStart bool, errMsg string) error {
+	now := float64(time.Now().Unix())
+
+	switch stage {
+	case "init":
+		updateStage(&status.Init, isStart, now, errMsg)
+	case "downloading-file":
+		updateStage(&status.DownloadingFile, isStart, now, errMsg)
+	case "pending-reboot":
+		updateStage(&status.PendingReboot, isStart, now, errMsg)
+	case "is-completed":
+		updateStage(&status.IsCompleted, isStart, now, errMsg)
+	case "parsing":
+		updateStage(&status.Parsing, isStart, now, errMsg)
+	case "boot-image":
+		updateStage(&status.BootImage, isStart, now, errMsg)
+	case "pre-script":
+		updateStage(&status.PreScript, isStart, now, errMsg)
+	case "config":
+		updateStage(&status.Config, isStart, now, errMsg)
+	case "post-script":
+		updateStage(&status.PostScript, isStart, now, errMsg)
+	case "bootstrap":
+		updateStage(&status.Bootstrap, isStart, now, errMsg)
+
+	default:
+		return fmt.Errorf("unknown stage: %s", stage)
 	}
 
-	// Atomic move of temp file to replace the original.
-	return os.Rename(tempPath, resultFilePath)
+	// Update the current stage
+	if isStart {
+		status.Stage = stage
+	} else {
+		status.Stage = ""
+	}
+
+	return nil
+}
+
+func updateStage(stageStatus *StageStatus, isStart bool, now float64, errMsg string) {
+	if isStart {
+		stageStatus.Start = now
+		stageStatus.End = 0
+	} else {
+		stageStatus.End = now
+		if errMsg != "" {
+			stageStatus.Errors = append(stageStatus.Errors, errMsg)
+		}
+	}
+}
+
+// SaveStatusToFile saves the Status object to the status.json file.
+func (a *Agent) saveStatus(status *Status) error {
+	return saveToFile(status, a.GetStatusFilePath())
+}
+
+// SaveResultFile saves the Result object to the result.json file.
+func (a *Agent) saveResult(result *Result) error {
+	return saveToFile(result, a.GetResultFilePath())
 }
 
 // EnsureDirExists checks if a directory exists, and creates it if it doesn't.
@@ -217,48 +196,49 @@ func CreateSymlink(targetFile, linkFile string) error {
 
 // RunCommandStatus runs the command in the background
 func (a *Agent) RunCommandStatus() error {
-	if err := a.prepareStatus(); err != nil {
-		return err
-	}
 	log.Println("RunCommandStatus")
+    // read the status file and print the status in command line
+    status, err := a.loadStatusFile()
+    if err != nil {
+        log.Println("failed to load status file: ", err)
+        return err
+    }
+    fmt.Printf("Current status: %+v\n", status)
 	return nil
 }
 
-func (a *Agent) prepareStatus() error {
+func (a *Agent) PrepareStatus() error {
 	log.Println("prepareStatus")
 
 	// Ensure /run/sztp directory exists
-	if err := EnsureDirExists(symlinkDir); err != nil {
-		fmt.Printf("Failed to create directory %s: %v\n", symlinkDir, err)
+	if err := EnsureDirExists(a.GetSymLinkDir()); err != nil {
+		fmt.Printf("Failed to create directory %s: %v\n", a.GetSymLinkDir(), err)
 		return err
 	}
 
-	// Ensure files are created
-    if err := EnsureFileExists(statusFilePath); err != nil {
+    if err := EnsureFileExists(a.GetStatusFilePath()); err != nil {
         return err
     }
-    if err := EnsureFileExists(resultFilePath); err != nil {
+    if err := EnsureFileExists(a.GetResultFilePath()); err != nil {
         return err
     }
 
-    // Define symlink paths
-    statusSymlinkPath := filepath.Join(symlinkDir, "status.json")
-    resultSymlinkPath := filepath.Join(symlinkDir, "result.json")
+    statusSymlinkPath := filepath.Join(a.GetSymLinkDir(), "status.json")
+    resultSymlinkPath := filepath.Join(a.GetSymLinkDir(), "result.json")
 
     // Create symlinks for status.json and result.json
-    if err := CreateSymlink(statusFilePath, statusSymlinkPath); err != nil {
+    if err := CreateSymlink(a.GetStatusFilePath(), statusSymlinkPath); err != nil {
         fmt.Printf("Failed to create symlink for status.json: %v\n", err)
         return err
     }
-    if err := CreateSymlink(resultFilePath, resultSymlinkPath); err != nil {
+    if err := CreateSymlink(a.GetResultFilePath(), resultSymlinkPath); err != nil {
         fmt.Printf("Failed to create symlink for result.json: %v\n", err)
         return err
     }
 
     fmt.Println("Symlinks created successfully.")
 
-    // Update the status file
-    if err := UpdateAndSaveStatus("init", true, ""); err != nil {
+    if err := a.UpdateAndSaveStatus("init", true, ""); err != nil {
         return err
     }
 
