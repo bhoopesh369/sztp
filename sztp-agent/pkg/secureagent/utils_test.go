@@ -117,7 +117,7 @@ func Test_saveToFile(t *testing.T) {
 	}
 }
 
-func TestEnsureDirExists(t *testing.T) {
+func Test_ensureDirExists(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "test_ensure_dir_exists")
 	if err != nil {
 		t.Fatalf("failed to create temp directory: %v", err)
@@ -145,7 +145,7 @@ func TestEnsureDirExists(t *testing.T) {
 	}
 }
 
-func TestEnsureFileExists(t *testing.T) {
+func Test_ensureFileExists(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "test_ensure_file_exists")
 	if err != nil {
 		t.Fatalf("failed to create temp directory: %v", err)
@@ -169,7 +169,7 @@ func TestEnsureFileExists(t *testing.T) {
 	}
 }
 
-func TestCreateSymlink(t *testing.T) {
+func Test_createSymlink(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "test_create_symlink")
 	if err != nil {
 		t.Fatalf("failed to create temp directory: %v", err)
@@ -190,7 +190,6 @@ func TestCreateSymlink(t *testing.T) {
 	}
 
 	linkInfo, err := os.Lstat(linkFile)
-	t.Logf("linkInfo: %v", linkInfo) ///
 	if err != nil {
 		t.Fatalf("failed to stat symlink: %v", err)
 	}

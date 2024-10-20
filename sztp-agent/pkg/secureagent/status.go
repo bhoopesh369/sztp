@@ -9,20 +9,68 @@ Copyright (C) 2022 Red Hat.
 package secureagent
 
 import (
-    "encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"time"
 )
 
+type StageType int64
+
+const (
+	StageTypeInit StageType = iota
+	StageTypeDownloadingFile
+	StageTypePendingReboot
+	StageTypeParsing
+	StageTypeOnboarding
+	StageTypeRedirect
+	StageTypeBootImage
+	StageTypePreScript
+	StageTypeConfig
+	StageTypePostScript
+	StageTypeBootstrap
+	StageTypeIsCompleted
+)
+
+func (s StageType) String() string {
+	switch s {
+	case StageTypeInit:
+		return "init"
+	case StageTypeDownloadingFile:
+		return "downloading-file"
+	case StageTypePendingReboot:
+		return "pending-reboot"
+	case StageTypeParsing:
+		return "parsing"
+	case StageTypeOnboarding:
+		return "onboarding"
+	case StageTypeRedirect:
+		return "redirect"
+	case StageTypeBootImage:
+		return "boot-image"
+	case StageTypePreScript:
+		return "pre-script"
+	case StageTypeConfig:
+		return "config"
+	case StageTypePostScript:
+		return "post-script"
+	case StageTypeBootstrap:
+		return "bootstrap"
+	case StageTypeIsCompleted:
+		return "is-completed"
+	default:
+		return "unknown"
+	}
+}
+
 // Status represents the status of the provisioning process.
 type Status struct {
     Init            StageStatus `json:"init"`
-    DownloadingFile StageStatus `json:"downloading-file"` // not sure if this is needed
+    DownloadingFile StageStatus `json:"downloading-file"`
     PendingReboot   StageStatus `json:"pending-reboot"`
     Parsing         StageStatus `json:"parsing"`
+	Onboarding      StageStatus `json:"onboarding"`
+	Redirect        StageStatus `json:"redirect"`
     BootImage       StageStatus `json:"boot-image"`
     PreScript       StageStatus `json:"pre-script"`
     Config          StageStatus `json:"config"`
@@ -30,12 +78,10 @@ type Status struct {
     Bootstrap       StageStatus `json:"bootstrap"`
     IsCompleted     StageStatus `json:"is-completed"`
     Informational   string      `json:"informational"`
-    DataSource      string      `json:"datasource"`
     Stage           string      `json:"stage"`
 }
 
 type Result struct {
-    DataSource string   `json:"dat asource"`
     Errors     []string `json:"errors"`
 }
 
@@ -45,67 +91,78 @@ type StageStatus struct {
     End    float64  `json:"end"`
 }
 
-// LoadStatusFile loads the current status.json from the filesystem.
-func (a *Agent) loadStatusFile() (*Status, error) {
-    file, err := os.ReadFile(a.GetStatusFilePath())
-    if err != nil {
-        return nil, err
-    }
+func (a *Agent) getCurrStatus() (*Status, error) {
     var status Status
-    err = json.Unmarshal(file, &status)
+    err := loadFile(a.GetStatusFilePath(), &status)
     if err != nil {
         return nil, err
     }
     return &status, nil
 }
 
-func (a *Agent) updateAndSaveStatus(stage string, isStart bool, errMsg string) error {
-	status, err := a.loadStatusFile()
+func (a *Agent) getCurrResult() (*Result, error) {
+    var result Result
+    err := loadFile(a.GetResultFilePath(), &result)
+    if err != nil {
+        return nil, err
+    }
+    return &result, nil
+}
+
+func (a *Agent) createNewStatus() *Status {
+	return &Status{
+		Stage:      "",
+		IsCompleted: StageStatus{},
+	}
+}
+
+// updateAndSaveStatus updates the status object for a specific stage and saves it to the status.json file.
+func (a *Agent) updateAndSaveStatus(s StageType, isStart bool, errMsg string) error {
+	status, err := a.getCurrStatus()
 	if err != nil {
 		fmt.Println("Creating a new status file.")
 		status = a.createNewStatus()
 	}
 
-	if err := a.updateStageStatus(status, stage, isStart, errMsg); err != nil {
+	err = a.updateStageStatus(status, s, isStart, errMsg)
+	if err != nil {
 		return err
 	}
 
 	return a.saveStatus(status)
 }
 
-// createNewStatus initializes a new Status object when status.json doesn't exist.
-func (a *Agent) createNewStatus() *Status {
-	return &Status{
-		DataSource: "ds",
-		Stage:      "",
-	}
-}
-
 // updateStageStatus updates the status object for a specific stage.
-func (a *Agent) updateStageStatus(status *Status, stage string, isStart bool, errMsg string) error {
+func (a *Agent) updateStageStatus(status *Status, stageType StageType, isStart bool, errMsg string) error {
 	now := float64(time.Now().Unix())
 
-	switch stage {
-	case "init":
-		updateStage(&status.Init, isStart, now, errMsg)
-	case "downloading-file":
-		updateStage(&status.DownloadingFile, isStart, now, errMsg)
-	case "pending-reboot":
-		updateStage(&status.PendingReboot, isStart, now, errMsg)
-	case "is-completed":
-		updateStage(&status.IsCompleted, isStart, now, errMsg)
-	case "parsing":
-		updateStage(&status.Parsing, isStart, now, errMsg)
-	case "boot-image":
-		updateStage(&status.BootImage, isStart, now, errMsg)
-	case "pre-script":
-		updateStage(&status.PreScript, isStart, now, errMsg)
-	case "config":
-		updateStage(&status.Config, isStart, now, errMsg)
-	case "post-script":
-		updateStage(&status.PostScript, isStart, now, errMsg)
-	case "bootstrap":
-		updateStage(&status.Bootstrap, isStart, now, errMsg)
+	stage := stageType.String()
+
+	switch stageType {
+	case StageTypeInit:
+		a.updateStage(&status.Init, isStart, now, errMsg)
+	case StageTypeDownloadingFile:
+		a.updateStage(&status.DownloadingFile, isStart, now, errMsg)
+	case StageTypePendingReboot:
+		a.updateStage(&status.PendingReboot, isStart, now, errMsg)
+	case StageTypeIsCompleted:
+		a.updateStage(&status.IsCompleted, isStart, now, errMsg)
+	case StageTypeParsing:
+		a.updateStage(&status.Parsing, isStart, now, errMsg)
+	case StageTypeOnboarding:
+		a.updateStage(&status.Onboarding, isStart, now, errMsg)
+	case StageTypeRedirect:
+		a.updateStage(&status.Redirect, isStart, now, errMsg)
+	case StageTypeBootImage:
+		a.updateStage(&status.BootImage, isStart, now, errMsg)
+	case StageTypePreScript:
+		a.updateStage(&status.PreScript, isStart, now, errMsg)
+	case StageTypeConfig:
+		a.updateStage(&status.Config, isStart, now, errMsg)
+	case StageTypePostScript:
+		a.updateStage(&status.PostScript, isStart, now, errMsg)
+	case StageTypeBootstrap:
+		a.updateStage(&status.Bootstrap, isStart, now, errMsg)
 
 	default:
 		return fmt.Errorf("unknown stage: %s", stage)
@@ -113,15 +170,15 @@ func (a *Agent) updateStageStatus(status *Status, stage string, isStart bool, er
 
 	// Update the current stage
 	if isStart {
-		status.Stage = stage
+		status.Stage = stage + "-in-progress"
 	} else {
-		status.Stage = ""
+		status.Stage = stage + "-completed"
 	}
 
 	return nil
 }
 
-func updateStage(stageStatus *StageStatus, isStart bool, now float64, errMsg string) {
+func (a *Agent) updateStage(stageStatus *StageStatus, isStart bool, now float64, errMsg string) {
 	if isStart {
 		stageStatus.Start = now
 		stageStatus.End = 0
@@ -129,25 +186,39 @@ func updateStage(stageStatus *StageStatus, isStart bool, now float64, errMsg str
 		stageStatus.End = now
 		if errMsg != "" {
 			stageStatus.Errors = append(stageStatus.Errors, errMsg)
+			a.updateAndSaveResult(errMsg)
 		}
 	}
 }
 
-// SaveStatusToFile saves the Status object to the status.json file.
 func (a *Agent) saveStatus(status *Status) error {
 	return saveToFile(status, a.GetStatusFilePath())
 }
 
-// SaveResultFile saves the Result object to the result.json file.
 func (a *Agent) saveResult(result *Result) error {
 	return saveToFile(result, a.GetResultFilePath())
+}
+
+func (a *Agent) updateAndSaveResult(errMsg string) error {
+	result, err := a.getCurrResult()
+	if err != nil {
+		fmt.Println("Creating a new result file.")
+		result = &Result{
+			Errors: []string{},
+		}
+	}
+
+	if errMsg != "" {
+		result.Errors = append(result.Errors, errMsg)
+	}
+
+	return a.saveResult(result)
 }
 
 // RunCommandStatus runs the command in the background
 func (a *Agent) RunCommandStatus() error {
 	log.Println("RunCommandStatus")
-    // read the status file and print the status in command line
-    status, err := a.loadStatusFile()
+    status, err := a.getCurrStatus()
     if err != nil {
         log.Println("failed to load status file: ", err)
         return err
@@ -187,7 +258,7 @@ func (a *Agent) prepareStatus() error {
 
     fmt.Println("Symlinks created successfully.")
 
-    if err := a.updateAndSaveStatus("init", true, ""); err != nil {
+    if err := a.updateAndSaveStatus(StageTypeInit, true, ""); err != nil {
         return err
     }
 

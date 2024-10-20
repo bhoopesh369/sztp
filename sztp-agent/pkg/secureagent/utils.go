@@ -89,7 +89,6 @@ func calculateSHA256File(filePath string) (string, error) {
 	return checkSum, nil
 }
 
-// saveToFile writes the given data to a specified file path.
 func saveToFile(data interface{}, filePath string) error {
 	tempPath := filePath + ".tmp"
 	file, err := os.Create(tempPath)
@@ -107,7 +106,6 @@ func saveToFile(data interface{}, filePath string) error {
 	return os.Rename(tempPath, filePath)
 }
 
-// EnsureDirExists checks if a directory exists, and creates it if it doesn't.
 func ensureDirExists(dir string) error {
     if _, err := os.Stat(dir); os.IsNotExist(err) {
         err := os.MkdirAll(dir, 0755) // Create the directory with appropriate permissions
@@ -118,17 +116,13 @@ func ensureDirExists(dir string) error {
     return nil
 }
 
-// EnsureFile ensures that a file exists; creates it if it does not.
 func ensureFileExists(filePath string) error {
-    // Ensure the directory exists
     dir := filepath.Dir(filePath)
     if err := ensureDirExists(dir); err != nil {
         return err
     }
 
-    // Check if the file already exists
     if _, err := os.Stat(filePath); os.IsNotExist(err) {
-        // File does not exist, create it
         file, err := os.Create(filePath)
         if err != nil {
             return fmt.Errorf("failed to create file %s: %v", filePath, err)
@@ -141,19 +135,27 @@ func ensureFileExists(filePath string) error {
     return nil
 }
 
-// CreateSymlink creates a symlink for a file from target to link location.
 func createSymlink(targetFile, linkFile string) error {
-    // Ensure the directory for the symlink exists
     linkDir := filepath.Dir(linkFile)
     if err := ensureDirExists(linkDir); err != nil {
         return err
     }
 
-    // Remove any existing symlink
     if _, err := os.Lstat(linkFile); err == nil {
         os.Remove(linkFile)
     }
 
-    // Create a new symlink
     return os.Symlink(targetFile, linkFile)
+}
+
+func loadFile(filePath string, v interface{}) error {
+    file, err := os.ReadFile(filePath)
+    if err != nil {
+        return err
+    }
+    err = json.Unmarshal(file, v)
+    if err != nil {
+        return err
+    }
+    return nil
 }
